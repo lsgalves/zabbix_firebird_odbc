@@ -1,0 +1,483 @@
+zabbix_export:
+  version: '5.4'
+  date: '2022-06-06T10:59:51Z'
+  groups:
+    -
+      uuid: 748ad4d098d447d492bb935c907f652f
+      name: Templates/Databases
+  templates:
+    -
+      uuid: 01896636376747a8a5ba2fd1acab94d3
+      template: 'Firebird by ODBC'
+      name: 'Firebird by ODBC'
+      description: |
+        Firebird template to monitoring database and server.
+        
+        1. Install Firebird ODBC driver on Zabbix server or Zabbix proxy. See Firebird documentation for instructions: https://firebirdsql.org/file/documentation/html/en/refdocs/fbodbc20/firebird-odbc-driver-20-manual.html#fbodbc205-configure
+        2. Set the macro value {$FIREBIRD.DSN} as defined in the data source.
+      groups:
+        -
+          name: Templates/Databases
+      items:
+        -
+          uuid: 47c4bbc32c0046a09bff7a0f4b133959
+          name: 'Firebird: Get performance counters'
+          type: ODBC
+          key: 'db.odbc.get[get_status_variables,"{$FIREBIRD.DSN}"]'
+          delay: 10m
+          history: '0'
+          trends: '0'
+          value_type: TEXT
+          params: |
+            SELECT 'Version' as counter_name, RDB$GET_CONTEXT('SYSTEM', 'ENGINE_VERSION') as cntr_value
+            FROM RDB$DATABASE
+            UNION
+            SELECT 'Active Transactions' as counter_name, count(*) as cntr_value
+            FROM MON$TRANSACTIONS
+            WHERE MON$STATE = 1
+            UNION
+            SELECT 'Open Connections' as counter_name, count(*) as cntr_value
+            FROM MON$ATTACHMENTS
+            UNION
+            SELECT 'IDLE Connections' as counter_name, count(*) as cntr_value
+            FROM MON$ATTACHMENTS
+            WHERE MON$STATE = 0
+            UNION
+            SELECT 'Database State' as counter_name, MON$SHUTDOWN_MODE as cntr_value
+            FROM MON$DATABASE
+            UNION
+            SELECT 'Database Creation Date' as counter_name, MON$CREATION_DATE as cntr_value
+            FROM MON$DATABASE
+            UNION
+            SELECT 'Pages Allocated Externally' as counter_name, MON$PAGES as cntr_value
+            FROM MON$DATABASE
+            UNION
+            SELECT 'Backup State' as counter_name, MON$BACKUP_STATE as cntr_value
+            FROM MON$DATABASE
+            UNION
+            SELECT 'Page Fetches' as counter_name, MON$PAGE_FETCHES as cntr_value
+            FROM MON$IO_STATS
+            WHERE MON$STAT_GROUP = 0
+            UNION
+            SELECT 'Page Writes' as counter_name, MON$PAGE_WRITES as cntr_value
+            FROM MON$IO_STATS
+            WHERE MON$STAT_GROUP = 0
+            UNION
+            SELECT 'Database Memory Used' as counter_name, MON$MEMORY_USED as cntr_value
+            FROM MON$MEMORY_USAGE
+            WHERE MON$STAT_GROUP = 0
+            UNION
+            SELECT 'Database Page Size' as counter_name, MON$PAGE_SIZE as cntr_value
+            FROM MON$DATABASE
+            UNION
+            SELECT 'Database Allocated Pages' as counter_name, MON$PAGE_BUFFERS as cntr_value
+            FROM MON$DATABASE
+            UNION
+            SELECT 'Stalled Statements' as counter_name, count(*) as cntr_value
+            FROM MON$STATEMENTS
+            WHERE MON$STATE = 2
+            UNION
+            SELECT 'Running Statements' as counter_name, count(*) as cntr_value
+            FROM MON$STATEMENTS
+            WHERE MON$STATE = 1 AND MON$ATTACHMENT_ID <> CURRENT_CONNECTION
+          description: 'The item gets server global status information.'
+        -
+          uuid: 86466d2bab6544389e7a2f6b055caf32
+          name: 'Firebird: Database allocated pages'
+          type: DEPENDENT
+          key: firebird.allocated_pages
+          delay: '0'
+          history: 7d
+          description: 'The number of allocated pages in the database.'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - '$[?(@.COUNTER_NAME==''Database Allocated Pages'')].CNTR_VALUE.first()'
+          master_item:
+            key: 'db.odbc.get[get_status_variables,"{$FIREBIRD.DSN}"]'
+          tags:
+            -
+              tag: Application
+              value: Firebird
+        -
+          uuid: 2e3f03e94def446fbc20576bea496f33
+          name: 'Firebird: Backup state'
+          type: DEPENDENT
+          key: firebird.backup_state
+          delay: '0'
+          history: 7d
+          trends: '0'
+          value_type: TEXT
+          description: |
+            Backup state:
+            0 - Normal;
+            1 - Stalled;
+            2 - Merge.
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - '$[?(@.COUNTER_NAME==''Backup State'')].CNTR_VALUE.first()'
+            -
+              type: STR_REPLACE
+              parameters:
+                - '0'
+                - Normal
+            -
+              type: STR_REPLACE
+              parameters:
+                - '1'
+                - Stalled
+            -
+              type: STR_REPLACE
+              parameters:
+                - '2'
+                - Merge
+          master_item:
+            key: 'db.odbc.get[get_status_variables,"{$FIREBIRD.DSN}"]'
+          tags:
+            -
+              tag: Application
+              value: Firebird
+          triggers:
+            -
+              uuid: 2eab34ab732f45209fef07fa55c92966
+              expression: 'last(/Firebird by ODBC/firebird.backup_state,#1)<>last(/Firebird by ODBC/firebird.backup_state,#2)'
+              name: 'Firebird: Physical Backup (nBackup) is running (the state is: {ITEM.VALUE})'
+              priority: INFO
+              description: |
+                Firebird database is running nBackup. Backup state:
+                0 - Normal;
+                1 - Stalled;
+                2 - Merge.
+              manual_close: 'YES'
+        -
+          uuid: c74338424af14ab8972e7c60726faf6f
+          name: 'Firebird: Database creation date'
+          type: DEPENDENT
+          key: firebird.database_date
+          delay: '0'
+          history: 7d
+          trends: '0'
+          value_type: TEXT
+          description: 'The date and time when the database was created or was last restored.'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - '$[?(@.COUNTER_NAME==''Database Creation Date'')].CNTR_VALUE.first()'
+          master_item:
+            key: 'db.odbc.get[get_status_variables,"{$FIREBIRD.DSN}"]'
+          tags:
+            -
+              tag: Application
+              value: Firebird
+          triggers:
+            -
+              uuid: 79f852d61f1f4c708e4acfb6a31c4eab
+              expression: 'last(/Firebird by ODBC/firebird.database_date,#1)<>last(/Firebird by ODBC/firebird.database_date,#2) and length(last(/Firebird by ODBC/firebird.database_date))>0'
+              name: 'Firebird: Database has restored'
+              priority: INFO
+              description: 'Firebird database has restored.'
+              manual_close: 'YES'
+        -
+          uuid: 1b5989ea37d84008a81820d0f4bb18e2
+          name: 'Firebird: Database state'
+          type: DEPENDENT
+          key: firebird.database_state
+          delay: '0'
+          history: 7d
+          description: |
+            Database state:
+            0 - Online;
+            1 - Multi-user shutdown;
+            2 - Single-user shutdown;
+            3 - Full-shutdown.
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - '$[?(@.COUNTER_NAME==''Database State'')].CNTR_VALUE.first()'
+          master_item:
+            key: 'db.odbc.get[get_status_variables,"{$FIREBIRD.DSN}"]'
+          tags:
+            -
+              tag: Application
+              value: Firebird
+          triggers:
+            -
+              uuid: 92d73308024c4852a3e603c7f7e4a0b2
+              expression: 'last(/Firebird by ODBC/firebird.database_state)<>0'
+              name: 'Firebird: Database is down'
+              priority: HIGH
+              description: |
+                The Firebird Database is shutdown. (The current state is {ITEM.VALUE}):
+                0 - The database is online;
+                1 - Multi-user shutdown;
+                2 - Single-user shutdown;
+                3 - Full shutdown.
+        -
+          uuid: e2c8a080f2494e70a6f28385257f3eff
+          name: 'Firebird: Pages allocated externally'
+          type: DEPENDENT
+          key: firebird.external_pages
+          delay: '0'
+          history: 7d
+          description: 'The number of external pages allocated.'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - '$[?(@.COUNTER_NAME==''Pages Allocated Externally'')].CNTR_VALUE.first()'
+          master_item:
+            key: 'db.odbc.get[get_status_variables,"{$FIREBIRD.DSN}"]'
+          tags:
+            -
+              tag: Application
+              value: Firebird
+        -
+          uuid: 10b639140c3c45799917ea73e418e0f9
+          name: 'Firebird: Idle connections'
+          type: DEPENDENT
+          key: firebird.idle_connections
+          delay: '0'
+          history: 7d
+          description: 'Number of currently idle connections.'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - '$[?(@.COUNTER_NAME==''IDLE Connections'')].CNTR_VALUE.first()'
+          master_item:
+            key: 'db.odbc.get[get_status_variables,"{$FIREBIRD.DSN}"]'
+          tags:
+            -
+              tag: Application
+              value: Firebird
+          triggers:
+            -
+              uuid: 142ca8d7cf144f619d21fa4f68349497
+              expression: 'min(/Firebird by ODBC/firebird.idle_connections,5m)>{$FIREBIRD.IDLE_CONNECTION.WARN}'
+              name: 'Firebird: Number of idle connections too high (over {$FIREBIRD.IDLE_CONNECTION.WARN} for 5m)'
+              priority: WARNING
+              description: 'Too high number of idle connections.'
+        -
+          uuid: f908880b79d04b6eb4e54d4bd8bec96b
+          name: 'Firebird: Database memory usage'
+          type: DEPENDENT
+          key: firebird.memory_usage
+          delay: '0'
+          history: 7d
+          description: 'Database memory usage in bytes.'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - '$[?(@.COUNTER_NAME==''Database Memory Used'')].CNTR_VALUE.first()'
+          master_item:
+            key: 'db.odbc.get[get_status_variables,"{$FIREBIRD.DSN}"]'
+          tags:
+            -
+              tag: Application
+              value: Firebird
+        -
+          uuid: 2d007697e3544badb38b870aa6a5c9ae
+          name: 'Firebird: Open connections'
+          type: DEPENDENT
+          key: firebird.open_connections
+          delay: '0'
+          history: 7d
+          description: 'Number of currently open connections.'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - '$[?(@.COUNTER_NAME==''Open Connections'')].CNTR_VALUE.first()'
+          master_item:
+            key: 'db.odbc.get[get_status_variables,"{$FIREBIRD.DSN}"]'
+          tags:
+            -
+              tag: Application
+              value: Firebird
+          triggers:
+            -
+              uuid: c3ba746e408541dc897e246cf7488efe
+              expression: 'min(/Firebird by ODBC/firebird.open_connections,5m)>{$FIREBIRD.CONNECTION.MAX}'
+              name: 'Firebird: Number of connections too high (over {$FIREBIRD.CONNECTION.MAX} for 5m)'
+              priority: AVERAGE
+              description: 'Too high number of connections.'
+        -
+          uuid: 0e2187734c5c4c588302cab8f92e0a5c
+          name: 'Firebird: Page fetches'
+          type: DEPENDENT
+          key: firebird.page_fetches
+          delay: '0'
+          history: 7d
+          description: 'Number of page fetches in the database.'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - '$[?(@.COUNTER_NAME==''Page Fetches'')].CNTR_VALUE.first()'
+          master_item:
+            key: 'db.odbc.get[get_status_variables,"{$FIREBIRD.DSN}"]'
+          tags:
+            -
+              tag: Application
+              value: Firebird
+        -
+          uuid: d2bc555ce8954a8fbd721dbc564e7e9b
+          name: 'Firebird: Database page size'
+          type: DEPENDENT
+          key: firebird.page_size
+          delay: '0'
+          history: 7d
+          description: |
+            The number of pages configured to use for the database.
+            Allowed page sizes: 4096, 8192, 16384 or 32768 (>= Firebird 4)
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - '$[?(@.COUNTER_NAME==''Database Page Size'')].CNTR_VALUE.first()'
+          master_item:
+            key: 'db.odbc.get[get_status_variables,"{$FIREBIRD.DSN}"]'
+          tags:
+            -
+              tag: Application
+              value: Firebird
+        -
+          uuid: 00266696b5a04dbcbe77f62e36d1d909
+          name: 'Firebird: Page writes'
+          type: DEPENDENT
+          key: firebird.page_writes
+          delay: '0'
+          history: 7d
+          description: 'Number of page writes in the database.'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - '$[?(@.COUNTER_NAME==''Page Writes'')].CNTR_VALUE.first()'
+          master_item:
+            key: 'db.odbc.get[get_status_variables,"{$FIREBIRD.DSN}"]'
+          tags:
+            -
+              tag: Application
+              value: Firebird
+        -
+          uuid: 874a3fa0e94b4a698b20209291885d73
+          name: 'Firebird: Running statements'
+          type: DEPENDENT
+          key: firebird.running_statements
+          delay: '0'
+          history: 7d
+          description: 'The number of running statements.'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - '$[?(@.COUNTER_NAME==''Running Statements'')].CNTR_VALUE.first()'
+          master_item:
+            key: 'db.odbc.get[get_status_variables,"{$FIREBIRD.DSN}"]'
+          tags:
+            -
+              tag: Application
+              value: Firebird
+        -
+          uuid: abc9566c443844b1bf3c35f0aa8cb874
+          name: 'Firebird: Stalled statements'
+          type: DEPENDENT
+          key: firebird.stalled_statements
+          delay: '0'
+          history: 7d
+          description: 'The number of stalled statements.'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - '$[?(@.COUNTER_NAME==''Stalled Statements'')].CNTR_VALUE.first()'
+          master_item:
+            key: 'db.odbc.get[get_status_variables,"{$FIREBIRD.DSN}"]'
+          tags:
+            -
+              tag: Application
+              value: Firebird
+          triggers:
+            -
+              uuid: c88f10213b1d4d5ea5d9513f26904458
+              expression: 'min(/Firebird by ODBC/firebird.stalled_statements,5m)>{$FIREBIRD.STALLED_STATEMENTS.MAX}'
+              name: 'Firebird: Number of stalled statements too high (over {$FIREBIRD.STALLED_STATEMENTS.MAX} for 5m)'
+              priority: AVERAGE
+              description: 'Too high number of stalled statements.'
+        -
+          uuid: a53c56f027d444f08e66d6a50bcf1716
+          name: 'Firebird: Total active transactions'
+          type: DEPENDENT
+          key: firebird.transactions
+          delay: '0'
+          history: 7d
+          description: 'The number of currently active transactions of all types.'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - '$[?(@.COUNTER_NAME==''Active Transactions'')].CNTR_VALUE.first()'
+          master_item:
+            key: 'db.odbc.get[get_status_variables,"{$FIREBIRD.DSN}"]'
+          tags:
+            -
+              tag: Application
+              value: Firebird
+        -
+          uuid: 9b0014028d9a4ec8b268a2041a111378
+          name: 'Firebird: Version'
+          type: DEPENDENT
+          key: firebird.version
+          delay: '0'
+          history: 2w
+          trends: '0'
+          value_type: CHAR
+          description: 'Firebird Server version.'
+          preprocessing:
+            -
+              type: JSONPATH
+              parameters:
+                - '$[?(@.COUNTER_NAME==''Version'')].CNTR_VALUE.first()'
+            -
+              type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1d
+          master_item:
+            key: 'db.odbc.get[get_status_variables,"{$FIREBIRD.DSN}"]'
+          tags:
+            -
+              tag: Application
+              value: Firebird
+          triggers:
+            -
+              uuid: 9fb187cdf7a7442da33d0508eb823bce
+              expression: 'last(/Firebird by ODBC/firebird.version,#1)<>last(/Firebird by ODBC/firebird.version,#2) and length(last(/Firebird by ODBC/firebird.version))>0'
+              name: 'Firebird: Version has changed (new version value received: {ITEM.VALUE})'
+              priority: INFO
+              description: 'Firebird version has changed. Ack to close.'
+              manual_close: 'YES'
+      macros:
+        -
+          macro: '{$FIREBIRD.CONNECTION.MAX}'
+          value: '60'
+          description: 'The maximum connections - for the trigger expression.'
+        -
+          macro: '{$FIREBIRD.DSN}'
+          value: '<Put your DSN here>'
+          description: 'System data source name.'
+        -
+          macro: '{$FIREBIRD.IDLE_CONNECTION.WARN}'
+          value: '30'
+          description: 'The maximum idle connections stalled to warning - for the trigger expression.'
+        -
+          macro: '{$FIREBIRD.STALLED_STATEMENTS.MAX}'
+          value: '10'
+          description: 'The maximum stalled statements - for the trigger expression.'
+
